@@ -1,0 +1,79 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Tournament {
+  id            String   @id @default(cuid())
+  name          String   @default("Torneo di Padel Americano")
+  isMixed       Boolean  @default(false)
+  isFixedPairs  Boolean  @default(false)
+  numCourts     Int
+  numDays       Int
+  scoringType   String   @default("SETS")
+  scoringMode   String   @default("BEST_OF_1")
+  maxPoints     Int      @default(18)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  players Player[]
+  pairs   Pair[]
+  matches Match[]
+}
+
+model Player {
+  id           String     @id @default(cuid())
+  name         String
+  gender       String     @default("M")
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+}
+
+model Pair {
+  id           String     @id @default(cuid())
+  player1Id    String
+  player2Id    String
+  player1Name  String
+  player2Name  String
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  isFixed      Boolean    @default(true)
+  createdAt    DateTime   @default(now())
+
+  team1Matches  Match[] @relation("Team1")
+  team2Matches  Match[] @relation("Team2")
+  winnerMatches Match[] @relation("Winner")
+}
+
+model Match {
+  id           String   @id @default(cuid())
+  tournamentId String
+  tournament   Tournament @relation(fields: [tournamentId], references: [id], onDelete: Cascade)
+  dayNumber    Int
+  courtNumber  Int
+  team1Id      String
+  team2Id      String
+  status       String   @default("SCHEDULED")
+  winnerId     String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  team1      Pair    @relation("Team1", fields: [team1Id], references: [id])
+  team2      Pair    @relation("Team2", fields: [team2Id], references: [id])
+  winner     Pair?   @relation("Winner", fields: [winnerId], references: [id])
+  setResults SetResult[]
+}
+
+model SetResult {
+  id         String @id @default(cuid())
+  matchId    String
+  match      Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  setNumber  Int
+  team1Score Int    @default(0)
+  team2Score Int    @default(0)
+}
