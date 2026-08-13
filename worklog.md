@@ -38,3 +38,22 @@ Stage Summary:
 - Scheduling algorithm handles all tournament configurations
 - Production build succeeds, API routes verified via curl
 - Browser verification confirmed all views render correctly
+---
+Task ID: 2
+Agent: Main Developer
+Task: Implement scoring system revamp (win bonus, points validation, rankings rewrite) + change defaults
+
+Work Log:
+- Changed default `numDays` from 4 to 8 in Zustand store (initial + reset)
+- Changed default `maxPoints` from 18 to 16 in Zustand store and fallback in setup wizard
+- Previous session already implemented: winBonus field in schema/store/API, points sum validation (client+server), rankings with raw points + win bonus, rankings view display
+- Verified all defaults via Agent Browser:
+  - Giornate default: 8 ✓
+  - Max Points default: 16 ✓
+  - Win Bonus default: 2 ✓
+  - Confirm step shows "A 16 punti (bonus +2)" correctly
+
+Stage Summary:
+- Defaults changed: numDays=8, maxPoints=16
+- All scoring system changes (from previous session) confirmed working
+- Browser verification passed: setup wizard renders correct defaults

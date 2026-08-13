@@ -802,7 +802,7 @@ function ScoringStep() {
             <Input
               type="number"
               value={setup.maxPoints}
-              onChange={(e) => updateSetup({ maxPoints: Math.max(5, parseInt(e.target.value) || 18) })}
+              onChange={(e) => updateSetup({ maxPoints: Math.max(5, parseInt(e.target.value) || 16) })}
               className="w-20 text-center bg-surface text-neon border-border"
               min={5}
             />
