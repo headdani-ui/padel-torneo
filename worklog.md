@@ -57,3 +57,24 @@ Stage Summary:
 - Defaults changed: numDays=8, maxPoints=16
 - All scoring system changes (from previous session) confirmed working
 - Browser verification passed: setup wizard renders correct defaults
+---
+Task ID: 3
+Agent: Main Developer
+Task: Migrate database from SQLite to Turso (LibSQL) for Vercel deployment
+
+Work Log:
+- Installed `@prisma/adapter-libsql@6.11.1` (matching Prisma 6.x)
+- Updated `prisma/schema.prisma`: added `previewFeatures = ["driverAdapters"]` to generator
+- Rewrote `src/lib/db.ts`: uses PrismaLibSQL factory adapter (passes config {url, authToken} directly)
+- Adapter works with both `file:` URLs (local dev) and `libsql://` URLs (Turso production)
+- Fixed critical bug: PrismaLibSQL is a factory, NOT a client wrapper — pass config object directly
+- Created `.env.example` with documentation for both local and Turso URLs
+- Removed direct `@libsql/client` dependency (now transitive via adapter)
+- Verified via curl: API returns correct tournament data with LibSQL adapter
+
+Stage Summary:
+- Database layer migrated to LibSQL adapter (compatible with Turso cloud)
+- Local dev: uses `file:/home/z/my-project/db/custom.db` (same SQLite file)
+- Production: will use `libsql://dbname-orgname.turso.io` with auth token
+- Zero changes to app logic — all Prisma queries remain identical
+- Ready for Vercel deployment after Turso account setup
