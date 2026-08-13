@@ -93,11 +93,25 @@ export default function ResultsView() {
     try {
       const matchScores = scores[matchId] || getMatchScores(matchId);
 
-      // Validate
+      // Client-side pre-validation
       if (tournament.scoringType === 'POINTS') {
         const s = matchScores[0];
         if (!s || (s.team1Score === 0 && s.team2Score === 0)) {
           setError('Inserisci il punteggio');
+          setSaving(null);
+          return;
+        }
+        if (s.team1Score === s.team2Score) {
+          setError('I punteggi non possono essere pari. Serve un vincitore!');
+          setSaving(null);
+          return;
+        }
+        const sum = s.team1Score + s.team2Score;
+        const maxPts = tournament.maxPoints;
+        const isExact = sum === maxPts;
+        const isTiebreak = sum === maxPts + 1 && Math.abs(s.team1Score - s.team2Score) === 1;
+        if (!isExact && !isTiebreak) {
+          setError(`La somma deve essere ${maxPts} (oppure ${maxPts + 1} in caso di parità). Attuale: ${s.team1Score}+${s.team2Score}=${sum}`);
           setSaving(null);
           return;
         }
@@ -119,6 +133,7 @@ export default function ResultsView() {
           setResults: matchScores,
           scoringType: tournament.scoringType,
           scoringMode: tournament.scoringMode,
+          maxPoints: tournament.maxPoints,
         }),
       });
 
@@ -139,9 +154,22 @@ export default function ResultsView() {
     }
   };
 
+  // Validate a score entry in real time
+  const getScoreValidation = (matchId: string): { valid: boolean; message: string } => {
+    if (tournament.scoringType !== 'POINTS') return { valid: true, message: '' };
+    const matchScores = scores[matchId] || getMatchScores(matchId);
+    const s = matchScores[0];
+    if (!s || (s.team1Score === 0 && s.team2Score === 0)) return { valid: true, message: '' };
+    if (s.team1Score === s.team2Score) return { valid: false, message: 'Punteggi pari!' };
+    const sum = s.team1Score + s.team2Score;
+    const maxPts = tournament.maxPoints;
+    if (sum === maxPts) return { valid: true, message: '✓' };
+    if (sum === maxPts + 1 && Math.abs(s.team1Score - s.team2Score) === 1) return { valid: true, message: '✓ Tiebreak' };
+    return { valid: false, message: `Somma: ${sum}/${maxPts}` };
+  };
+
   return (
     <div className="space-y-4">
-      {/* Day Navigation */}
       <div className="flex items-center gap-2">
         <Button
           size="sm"
@@ -311,7 +339,16 @@ export default function ResultsView() {
 
                   {/* Save Button */}
                   {!isCompleted && (
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-end gap-2">
+                      {tournament.scoringType === 'POINTS' && !isCompleted && (() => {
+                        const v = getScoreValidation(match.id);
+                        if (!v.message) return null;
+                        return (
+                          <span className={`text-xs ${v.valid ? 'text-neon' : 'text-shocking'}`}>
+                            {v.message}
+                          </span>
+                        );
+                      })()}
                       <Button
                         size="sm"
                         onClick={() => handleSave(match.id)}

@@ -41,7 +41,7 @@ function TournamentHeader() {
       ? tournament.scoringMode === 'BEST_OF_1'
         ? 'Un set'
         : 'Miglior dei 3'
-      : `A ${tournament.maxPoints} punti`;
+      : `A ${tournament.maxPoints} pt (bonus +${tournament.winBonus || 0})`;
 
   return (
     <div className="bg-surface border-b border-border">

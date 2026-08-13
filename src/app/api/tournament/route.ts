@@ -18,6 +18,7 @@ export async function POST(request: NextRequest) {
       scoringType,
       scoringMode,
       maxPoints,
+      winBonus,
     } = body;
 
     // Validate inputs
@@ -72,6 +73,7 @@ export async function POST(request: NextRequest) {
         scoringType: scoringType || 'SETS',
         scoringMode: scoringMode || 'BEST_OF_1',
         maxPoints: maxPoints || 18,
+        winBonus: winBonus || 2,
       },
     });
 

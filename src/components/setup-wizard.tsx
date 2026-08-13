@@ -788,6 +788,7 @@ function ScoringStep() {
           </div>
         </div>
       ) : (
+        <>
         <div className="space-y-3">
           <p className="text-center text-neon-dim text-sm">Punteggio massimo per partita</p>
           <div className="flex justify-center items-center gap-2">
@@ -815,6 +816,8 @@ function ScoringStep() {
           </div>
           <p className="text-center text-neon-dim text-xs">
             Es: {setup.maxPoints} a 0, {setup.maxPoints - 1} a 1, {setup.maxPoints - 2} a 2...
+            <br />
+            In caso di parità ({Math.floor(setup.maxPoints / 2)} a {Math.floor(setup.maxPoints / 2)}) si gioca fino a +1 punto
           </p>
           <div className="flex justify-center gap-2 mt-2">
             {[15, 18, 21, 25, 30].map((n) => (
@@ -834,6 +837,56 @@ function ScoringStep() {
             ))}
           </div>
         </div>
+
+        {/* Win Bonus */}
+        <div className="space-y-3 mt-4">
+          <Separator className="bg-border" />
+          <p className="text-center text-neon-dim text-sm">Punti extra premio per la vittoria</p>
+          <div className="flex justify-center items-center gap-2">
+            <Button
+              variant="outline"
+              className="text-neon border-border"
+              onClick={() => updateSetup({ winBonus: Math.max(0, setup.winBonus - 1) })}
+            >
+              -
+            </Button>
+            <Input
+              type="number"
+              value={setup.winBonus}
+              onChange={(e) => updateSetup({ winBonus: Math.max(0, parseInt(e.target.value) || 0) })}
+              className="w-20 text-center bg-surface text-neon border-border"
+              min={0}
+            />
+            <Button
+              variant="outline"
+              className="text-neon border-border"
+              onClick={() => updateSetup({ winBonus: setup.winBonus + 1 })}
+            >
+              +
+            </Button>
+          </div>
+          <p className="text-center text-neon-dim text-xs">
+            Es: vince {setup.maxPoints - 2} a {2} → vincitore ottiene {setup.maxPoints - 2 + setup.winBonus} pt, perdente {2} pt
+          </p>
+          <div className="flex justify-center gap-2 mt-2">
+            {[0, 1, 2, 3, 5].map((n) => (
+              <Button
+                key={n}
+                size="sm"
+                variant={setup.winBonus === n ? 'default' : 'outline'}
+                className={
+                  setup.winBonus === n
+                    ? 'bg-shocking/80 text-white text-xs'
+                    : 'text-neon-dim border-border text-xs'
+                }
+                onClick={() => updateSetup({ winBonus: n })}
+              >
+                {n === 0 ? '0 (no bonus)' : `+${n}`}
+              </Button>
+            ))}
+          </div>
+        </div>
+        </>
       )}
 
       <div className="flex justify-between">
@@ -878,6 +931,7 @@ function ConfirmStep() {
           scoringType: setup.scoringType,
           scoringMode: setup.scoringMode,
           maxPoints: setup.maxPoints,
+          winBonus: setup.winBonus,
         }),
       });
 
@@ -909,7 +963,7 @@ function ConfirmStep() {
       ? setup.scoringMode === 'BEST_OF_1'
         ? 'Un set'
         : 'Miglior dei 3 set'
-      : `A ${setup.maxPoints} punti`;
+      : `A ${setup.maxPoints} punti (bonus +${setup.winBonus})`;
 
   return (
     <div className="space-y-6">

@@ -35,6 +35,7 @@ export interface TournamentSetup {
   scoringType: ScoringType;
   scoringMode: ScoringMode;
   maxPoints: number;
+  winBonus: number;
 }
 
 export interface TournamentData {
@@ -47,6 +48,7 @@ export interface TournamentData {
   scoringType: ScoringType;
   scoringMode: ScoringMode;
   maxPoints: number;
+  winBonus: number;
   players: { id: string; name: string; gender: string }[];
   pairs: {
     id: string;
@@ -104,6 +106,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
     scoringType: 'SETS',
     scoringMode: 'BEST_OF_1',
     maxPoints: 18,
+    winBonus: 2,
   },
   tournament: null,
   activeTab: 'calendar',
@@ -146,6 +149,7 @@ export const useTournamentStore = create<TournamentStore>((set, get) => ({
         scoringType: 'SETS',
         scoringMode: 'BEST_OF_1',
         maxPoints: 18,
+        winBonus: 2,
       },
       tournament: null,
       activeTab: 'calendar',

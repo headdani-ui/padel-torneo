@@ -5,7 +5,7 @@ import { db } from '@/lib/db';
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { matchId, setResults, scoringType, scoringMode } = body;
+    const { matchId, setResults, scoringType, scoringMode, maxPoints } = body;
 
     if (!matchId) {
       return NextResponse.json(
@@ -26,14 +26,50 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const effectiveMaxPoints = maxPoints || match.tournament.maxPoints;
+
+    // Validate scores for POINTS mode
+    if (scoringType === 'POINTS') {
+      const total1 = setResults[0]?.team1Score || 0;
+      const total2 = setResults[0]?.team2Score || 0;
+      const sum = total1 + total2;
+
+      // Rule: sum must equal maxPoints, OR sum = maxPoints + 1 with diff = 1 (tiebreak)
+      const isExact = sum === effectiveMaxPoints;
+      const isTiebreak = sum === effectiveMaxPoints + 1 && Math.abs(total1 - total2) === 1;
+
+      if (!isExact && !isTiebreak) {
+        return NextResponse.json(
+          {
+            error: `La somma dei punti deve essere ${effectiveMaxPoints} (oppure ${effectiveMaxPoints + 1} in caso di parità con +1 punto di differenza). Inserito: ${total1}+${total2}=${sum}`,
+          },
+          { status: 400 }
+        );
+      }
+
+      // Must have a winner (scores cannot be equal)
+      if (total1 === total2) {
+        return NextResponse.json(
+          { error: 'I punteggi non possono essere pari. Deve esserci un vincitore.' },
+          { status: 400 }
+        );
+      }
+
+      if (total1 < 0 || total2 < 0) {
+        return NextResponse.json(
+          { error: 'I punteggi non possono essere negativi.' },
+          { status: 400 }
+        );
+      }
+    }
+
     // Determine winner based on scoring type
     let winnerId: string | null = null;
 
     if (scoringType === 'POINTS') {
-      // Point-based: compare total scores
       const total1 = setResults[0]?.team1Score || 0;
       const total2 = setResults[0]?.team2Score || 0;
-      winnerId = total1 > total2 ? match.team1Id : total2 > total1 ? match.team2Id : null;
+      winnerId = total1 > total2 ? match.team1Id : match.team2Id;
     } else {
       // Set-based: count sets won
       let setsWon1 = 0;

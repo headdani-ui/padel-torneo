@@ -2,7 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useTournamentStore } from '@/store/tournament-store';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Trophy, Medal, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 
@@ -15,8 +15,7 @@ interface RankingEntry {
   draws: number;
   setsWon: number;
   setsLost: number;
-  pointsWon: number;
-  pointsLost: number;
+  earnedPoints: number;
 }
 
 export default function RankingsView() {
@@ -24,6 +23,7 @@ export default function RankingsView() {
   const [rankings, setRankings] = useState<RankingEntry[]>([]);
   const [rankingType, setRankingType] = useState<string>('');
   const [scoringType, setScoringType] = useState<string>('');
+  const [winBonus, setWinBonus] = useState<number>(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -38,6 +38,7 @@ export default function RankingsView() {
           setRankings(data.rankings);
           setRankingType(data.rankingType);
           setScoringType(data.scoringType);
+          setWinBonus(data.winBonus || 0);
         }
       } catch (err) {
         console.error('Error fetching rankings:', err);
@@ -94,17 +95,22 @@ export default function RankingsView() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between flex-wrap gap-2">
         <h2 className="text-lg font-bold neon-text flex items-center gap-2">
           <Trophy className="w-5 h-5" /> Classifica
         </h2>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <Badge className="bg-neon/10 text-neon border border-neon text-xs">
-            {completedMatches} partite giocate
+            {completedMatches} partite
           </Badge>
           <Badge className="bg-shocking/10 text-shocking border border-shocking text-xs">
             {rankingType === 'PAIRS' ? 'Coppie' : 'Singoli'}
           </Badge>
+          {scoringType === 'POINTS' && winBonus > 0 && (
+            <Badge className="bg-neon/10 text-neon border border-neon text-xs">
+              Bonus vittoria: +{winBonus}
+            </Badge>
+          )}
         </div>
       </div>
 
@@ -116,6 +122,7 @@ export default function RankingsView() {
             <div className="w-24 h-24 bg-surface rounded-t-lg flex flex-col items-center justify-center neon-border border-b-0">
               <Medal className="w-8 h-8 text-gray-300 mb-1" />
               <p className="text-neon text-xs font-bold truncate w-20">{rankings[1].name}</p>
+              <p className="text-neon-dim text-xs">{rankings[1].earnedPoints} pt</p>
             </div>
             <div className="w-24 h-16 bg-neon/5 neon-border border-t-0 flex items-center justify-center">
               <span className="text-3xl font-bold text-gray-300">2°</span>
@@ -127,6 +134,7 @@ export default function RankingsView() {
             <div className="w-28 h-28 bg-surface rounded-t-lg flex flex-col items-center justify-center neon-border border-b-0 shocking-glow">
               <Trophy className="w-10 h-10 text-yellow-400 mb-1" />
               <p className="text-neon text-sm font-bold truncate w-24">{rankings[0].name}</p>
+              <p className="shocking-text-sm text-xs">{rankings[0].earnedPoints} pt</p>
             </div>
             <div className="w-28 h-20 bg-shocking/5 neon-border border-t-0 flex items-center justify-center">
               <span className="text-4xl font-bold shocking-text">1°</span>
@@ -138,6 +146,7 @@ export default function RankingsView() {
             <div className="w-24 h-20 bg-surface rounded-t-lg flex flex-col items-center justify-center neon-border border-b-0">
               <Medal className="w-7 h-7 text-amber-600 mb-1" />
               <p className="text-neon text-xs font-bold truncate w-20">{rankings[2].name}</p>
+              <p className="text-neon-dim text-xs">{rankings[2].earnedPoints} pt</p>
             </div>
             <div className="w-24 h-12 bg-neon/5 neon-border border-t-0 flex items-center justify-center">
               <span className="text-2xl font-bold text-amber-600">3°</span>
@@ -155,9 +164,7 @@ export default function RankingsView() {
             <div>Nome</div>
             <div className="text-center w-12">V</div>
             <div className="text-center w-12">S</div>
-            <div className="text-center w-12">
-              {scoringType === 'SETS' ? 'Set±' : 'Pt±'}
-            </div>
+            <div className="text-center w-16">Punti</div>
             <div className="w-8"></div>
           </div>
 
@@ -196,11 +203,9 @@ export default function RankingsView() {
                   {entry.losses}
                 </Badge>
               </div>
-              <div className="text-center w-12 font-mono text-xs">
-                <span className="text-neon">
-                  {scoringType === 'SETS'
-                    ? entry.setsWon - entry.setsLost
-                    : entry.pointsWon - entry.pointsLost}
+              <div className="text-center w-16 font-mono text-sm font-bold">
+                <span className={idx === 0 ? 'shocking-text-sm' : 'neon-text-sm'}>
+                  {entry.earnedPoints}
                 </span>
               </div>
               <div className="w-8 flex justify-center">{getTrendIcon(entry)}</div>
@@ -210,10 +215,10 @@ export default function RankingsView() {
       </Card>
 
       {/* Legend */}
-      <div className="flex items-center justify-center gap-4 text-xs text-neon-dim">
+      <div className="flex items-center justify-center gap-4 text-xs text-neon-dim flex-wrap">
         <span>V = Vittorie</span>
         <span>S = Sconfitte</span>
-        <span>{scoringType === 'SETS' ? 'Set±' : 'Pt±'} = Differenza</span>
+        <span>Punti = {scoringType === 'POINTS' ? `Punti fatti${winBonus > 0 ? ' + bonus vittoria' : ''}` : 'Punti fatti'}</span>
       </div>
     </div>
   );

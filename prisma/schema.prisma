@@ -17,6 +17,7 @@ model Tournament {
   scoringType   String   @default("SETS")
   scoringMode   String   @default("BEST_OF_1")
   maxPoints     Int      @default(18)
+  winBonus      Int      @default(2)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 

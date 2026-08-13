@@ -23,6 +23,8 @@ export async function GET() {
     }
 
     const completedMatches = tournament.matches.filter(m => m.status === 'COMPLETED');
+    const isPointsMode = tournament.scoringType === 'POINTS';
+    const winBonus = tournament.winBonus || 0;
 
     if (tournament.isFixedPairs) {
       // Rankings by pair
@@ -36,8 +38,7 @@ export async function GET() {
           draws: number;
           setsWon: number;
           setsLost: number;
-          pointsWon: number;
-          pointsLost: number;
+          earnedPoints: number;
         }
       > = {};
 
@@ -51,8 +52,7 @@ export async function GET() {
           draws: 0,
           setsWon: 0,
           setsLost: 0,
-          pointsWon: 0,
-          pointsLost: 0,
+          earnedPoints: 0,
         };
       }
 
@@ -77,18 +77,36 @@ export async function GET() {
 
         t1.setsWon += setsWon1;
         t1.setsLost += setsWon2;
-        t1.pointsWon += pointsWon1;
-        t1.pointsLost += pointsWon2;
 
         t2.setsWon += setsWon2;
         t2.setsLost += setsWon1;
-        t2.pointsWon += pointsWon2;
-        t2.pointsLost += pointsWon1;
 
-        if (match.winnerId === match.team1Id) {
+        const team1Won = match.winnerId === match.team1Id;
+        const team2Won = match.winnerId === match.team2Id;
+        const isDraw = !team1Won && !team2Won;
+
+        if (isPointsMode) {
+          // Points mode: earned = scored points + win bonus
+          if (team1Won) {
+            t1.earnedPoints += pointsWon1 + winBonus;
+            t2.earnedPoints += pointsWon2;
+          } else if (team2Won) {
+            t2.earnedPoints += pointsWon2 + winBonus;
+            t1.earnedPoints += pointsWon1;
+          } else {
+            t1.earnedPoints += pointsWon1;
+            t2.earnedPoints += pointsWon2;
+          }
+        } else {
+          // Sets mode: earned = wins (each win = points TBD, but for now track wins)
+          t1.earnedPoints += pointsWon1;
+          t2.earnedPoints += pointsWon2;
+        }
+
+        if (team1Won) {
           t1.wins++;
           t2.losses++;
-        } else if (match.winnerId === match.team2Id) {
+        } else if (team2Won) {
           t2.wins++;
           t1.losses++;
         } else {
@@ -97,15 +115,11 @@ export async function GET() {
         }
       }
 
-      // Sort by wins, then sets difference, then points difference
+      // Sort: by earnedPoints desc, then by wins desc
       const rankings = Object.values(pairRankings).sort((a, b) => {
+        if (b.earnedPoints !== a.earnedPoints) return b.earnedPoints - a.earnedPoints;
         if (b.wins !== a.wins) return b.wins - a.wins;
-        const setDiffA = a.setsWon - a.setsLost;
-        const setDiffB = b.setsWon - b.setsLost;
-        if (setDiffB !== setDiffA) return setDiffB - setDiffA;
-        const pointDiffA = a.pointsWon - a.pointsLost;
-        const pointDiffB = b.pointsWon - b.pointsLost;
-        return pointDiffB - pointDiffA;
+        return 0;
       });
 
       return NextResponse.json({
@@ -113,6 +127,7 @@ export async function GET() {
         rankingType: 'PAIRS',
         rankings,
         scoringType: tournament.scoringType,
+        winBonus,
       });
     } else {
       // Rankings by individual player
@@ -127,8 +142,7 @@ export async function GET() {
           draws: number;
           setsWon: number;
           setsLost: number;
-          pointsWon: number;
-          pointsLost: number;
+          earnedPoints: number;
         }
       > = {};
 
@@ -143,8 +157,7 @@ export async function GET() {
           draws: 0,
           setsWon: 0,
           setsLost: 0,
-          pointsWon: 0,
-          pointsLost: 0,
+          earnedPoints: 0,
         };
       }
 
@@ -171,7 +184,19 @@ export async function GET() {
         const team2Won = match.winnerId === match.team2Id;
         const isDraw = !team1Won && !team2Won;
 
-        // Update stats for team1 players
+        // Calculate points for each team member
+        let team1Earned: number;
+        let team2Earned: number;
+
+        if (isPointsMode) {
+          team1Earned = team1Won ? pointsWon1 + winBonus : pointsWon1;
+          team2Earned = team2Won ? pointsWon2 + winBonus : pointsWon2;
+        } else {
+          team1Earned = pointsWon1;
+          team2Earned = pointsWon2;
+        }
+
+        // Update team1 players
         const p1 = playerRankings[team1.player1Id];
         const p2 = playerRankings[team1.player2Id];
         if (p1) {
@@ -180,8 +205,7 @@ export async function GET() {
           p1.draws += isDraw ? 1 : 0;
           p1.setsWon += setsWon1;
           p1.setsLost += setsWon2;
-          p1.pointsWon += pointsWon1;
-          p1.pointsLost += pointsWon2;
+          p1.earnedPoints += team1Earned;
         }
         if (p2) {
           p2.wins += team1Won ? 1 : 0;
@@ -189,11 +213,10 @@ export async function GET() {
           p2.draws += isDraw ? 1 : 0;
           p2.setsWon += setsWon1;
           p2.setsLost += setsWon2;
-          p2.pointsWon += pointsWon1;
-          p2.pointsLost += pointsWon2;
+          p2.earnedPoints += team1Earned;
         }
 
-        // Update stats for team2 players
+        // Update team2 players
         const p3 = playerRankings[team2.player1Id];
         const p4 = playerRankings[team2.player2Id];
         if (p3) {
@@ -202,8 +225,7 @@ export async function GET() {
           p3.draws += isDraw ? 1 : 0;
           p3.setsWon += setsWon2;
           p3.setsLost += setsWon1;
-          p3.pointsWon += pointsWon2;
-          p3.pointsLost += pointsWon1;
+          p3.earnedPoints += team2Earned;
         }
         if (p4) {
           p4.wins += team2Won ? 1 : 0;
@@ -211,20 +233,15 @@ export async function GET() {
           p4.draws += isDraw ? 1 : 0;
           p4.setsWon += setsWon2;
           p4.setsLost += setsWon1;
-          p4.pointsWon += pointsWon2;
-          p4.pointsLost += pointsWon1;
+          p4.earnedPoints += team2Earned;
         }
       }
 
-      // Sort by wins, then sets difference, then points difference
+      // Sort: by earnedPoints desc, then by wins desc
       const rankings = Object.values(playerRankings).sort((a, b) => {
+        if (b.earnedPoints !== a.earnedPoints) return b.earnedPoints - a.earnedPoints;
         if (b.wins !== a.wins) return b.wins - a.wins;
-        const setDiffA = a.setsWon - a.setsLost;
-        const setDiffB = b.setsWon - b.setsLost;
-        if (setDiffB !== setDiffA) return setDiffB - setDiffA;
-        const pointDiffA = a.pointsWon - a.pointsLost;
-        const pointDiffB = b.pointsWon - b.pointsLost;
-        return pointDiffB - pointDiffA;
+        return 0;
       });
 
       return NextResponse.json({
@@ -232,6 +249,7 @@ export async function GET() {
         rankingType: 'PLAYERS',
         rankings,
         scoringType: tournament.scoringType,
+        winBonus,
       });
     }
   } catch (error) {
