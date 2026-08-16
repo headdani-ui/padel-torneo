@@ -16,6 +16,14 @@ export default function CalendarView() {
 
   if (!tournament) return null;
 
+  // Helper: get player gender by ID
+  const playerMap = new Map(tournament.players.map(p => [p.id, p.gender]));
+  const getGenderColor = (playerId: string, isWinner: boolean) => {
+    const gender = playerMap.get(playerId);
+    const base = gender === 'M' ? 'male-text' : 'female-text';
+    return isWinner ? `${base} winner-glow` : base;
+  };
+
   const days = tournament.numDays;
   const dayMatches = tournament.matches.filter((m) => m.dayNumber === selectedDay);
   const courts = tournament.numCourts;
@@ -199,16 +207,12 @@ export default function CalendarView() {
                       {team1 && (
                         <>
                           <p
-                            className={`font-bold text-sm ${
-                              match.winnerId === team1.id ? 'shocking-text-sm' : 'text-neon'
-                            }`}
+                            className={`font-bold text-sm ${getGenderColor(team1.player1Id, match.winnerId === team1.id)}`}
                           >
                             {team1.player1Name}
                           </p>
                           <p
-                            className={`text-xs ${
-                              match.winnerId === team1.id ? 'shocking-text-sm' : 'text-neon-dim'
-                            }`}
+                            className={`font-semibold text-sm ${getGenderColor(team1.player2Id, match.winnerId === team1.id)}`}
                           >
                             {team1.player2Name}
                           </p>
@@ -257,16 +261,12 @@ export default function CalendarView() {
                       {team2 && (
                         <>
                           <p
-                            className={`font-bold text-sm ${
-                              match.winnerId === team2.id ? 'shocking-text-sm' : 'text-neon'
-                            }`}
+                            className={`font-bold text-sm ${getGenderColor(team2.player1Id, match.winnerId === team2.id)}`}
                           >
                             {team2.player1Name}
                           </p>
                           <p
-                            className={`text-xs ${
-                              match.winnerId === team2.id ? 'shocking-text-sm' : 'text-neon-dim'
-                            }`}
+                            className={`font-semibold text-sm ${getGenderColor(team2.player2Id, match.winnerId === team2.id)}`}
                           >
                             {team2.player2Name}
                           </p>

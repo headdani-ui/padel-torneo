@@ -28,6 +28,13 @@ export default function ResultsView() {
 
   if (!tournament) return null;
 
+  // Helper: get player gender by ID
+  const playerMap = new Map(tournament.players.map(p => [p.id, p.gender]));
+  const getGenderColor = (playerId: string) => {
+    const gender = playerMap.get(playerId);
+    return gender === 'M' ? 'male-text' : 'female-text';
+  };
+
   const days = tournament.numDays;
   const dayMatches = tournament.matches.filter((m) => m.dayNumber === selectedDay);
 
@@ -277,10 +284,12 @@ export default function ResultsView() {
                     {/* Team 1 */}
                     <div className="flex-1 text-right space-y-2">
                       <div>
-                        <p className="font-bold text-sm text-neon">
+                        <p className={`font-bold text-sm ${getGenderColor(team1?.player1Id || '')}`}>
                           {team1?.player1Name}
                         </p>
-                        <p className="text-xs text-neon-dim">{team1?.player2Name}</p>
+                        <p className={`font-semibold text-sm ${getGenderColor(team1?.player2Id || '')}`}>
+                          {team1?.player2Name}
+                        </p>
                       </div>
 
                       {matchScores.map((s) => (
@@ -314,10 +323,12 @@ export default function ResultsView() {
                     {/* Team 2 */}
                     <div className="flex-1 text-left space-y-2">
                       <div>
-                        <p className="font-bold text-sm text-neon">
+                        <p className={`font-bold text-sm ${getGenderColor(team2?.player1Id || '')}`}>
                           {team2?.player1Name}
                         </p>
-                        <p className="text-xs text-neon-dim">{team2?.player2Name}</p>
+                        <p className={`font-semibold text-sm ${getGenderColor(team2?.player2Id || '')}`}>
+                          {team2?.player2Name}
+                        </p>
                       </div>
 
                       {matchScores.map((s) => (
