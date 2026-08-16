@@ -78,3 +78,21 @@ Stage Summary:
 - Production: will use `libsql://dbname-orgname.turso.io` with auth token
 - Zero changes to app logic — all Prisma queries remain identical
 - Ready for Vercel deployment after Turso account setup
+---
+Task ID: 4
+Agent: Main Developer
+Task: Connect to Turso cloud database and push schema
+
+Work Log:
+- Updated .env with Turso connection URL and auth token
+- Created tables on Turso using direct libsql client SQL (Prisma CLI doesn't support libsql:// URLs)
+- Tables created: Tournament, Player, Pair, Match, SetResult
+- Verified READ: GET /api/tournament returns data from Turso ✓
+- Verified WRITE: DELETE /api/tournament/reset clears data on Turso ✓
+- Schema URL reverted to local file (Prisma CLI compatibility), adapter overrides at runtime
+
+Stage Summary:
+- Turso database fully operational with all 5 tables
+- App reads/writes successfully to cloud database
+- Turso connection: libsql://padel-torneo-headdani-ui.aws-eu-west-1.turso.io
+- Ready for Vercel deployment
