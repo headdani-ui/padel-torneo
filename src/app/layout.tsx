@@ -16,8 +16,20 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "🎾 Padel Americano - Torneo",
   description: "Gestione tornei di Padel Americano - Calendario, Risultati e Classifica",
+  manifest: "/manifest.json",
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: [
+      { url: "/icon-192.png", sizes: "192x192", type: "image/png" },
+      { url: "/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
+    apple: [
+      { url: "/icon-512.png" },
+    ],
+  },
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "default",
+    title: "Padel Torneo",
   },
 };
 
