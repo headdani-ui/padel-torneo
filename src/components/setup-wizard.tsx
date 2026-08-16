@@ -607,7 +607,7 @@ function DefinePairsStep() {
 function CourtsDaysStep() {
   const { setup, updateSetup, setWizardStep } = useTournamentStore();
 
-  const maxCourts = Math.floor(setup.players.length / 4);
+  const maxCourts = Math.min(4, Math.floor(setup.players.length / 4));
 
   const handleNext = () => {
     if (setup.numCourts < 1 || setup.numDays < 1) return;
@@ -644,7 +644,7 @@ function CourtsDaysStep() {
                 onChange={(e) => updateSetup({ numCourts: Math.min(maxCourts, Math.max(1, parseInt(e.target.value) || 1)) })}
                 className="w-16 text-center bg-surface text-neon border-border"
                 min={1}
-                max={maxCourts}
+                max={Math.min(4, maxCourts)}
               />
               <Button
                 variant="outline"

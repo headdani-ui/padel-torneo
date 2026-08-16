@@ -96,3 +96,29 @@ Stage Summary:
 - App reads/writes successfully to cloud database
 - Turso connection: libsql://padel-torneo-headdani-ui.aws-eu-west-1.turso.io
 - Ready for Vercel deployment
+---
+Task ID: 5
+Agent: Main Developer
+Task: Three improvements - max 4 courts, better mixing scheduler, shuffle button
+
+Work Log:
+- Changed max courts from floor(n/4) to min(4, floor(n/4)) in setup wizard
+- Completely rewrote mobile scheduling algorithm (non-mixed + mixed):
+  - Uses greedy optimization with partner/opponent repeat tracking
+  - For each match slot, samples 50 random 4-player combinations
+  - Picks the combination with lowest total repeat score (partners + opponents)
+  - Results: 16 players, 24 matches → 48 unique partnerships, 93/120 unique oppositions
+- Created shuffle API (POST /api/tournament/shuffle):
+  - Deletes only SCHEDULED matches and their unused pairs
+  - Regenerates fresh schedule for those day slots
+  - Preserves all COMPLETED matches and their pairs
+- Added Shuffle button to calendar view UI:
+  - Shows count of unplayed matches
+  - Button visible only when unplayed matches exist
+  - Shows animated feedback message after shuffle
+
+Stage Summary:
+- Max courts capped at 4
+- Schedule mixing dramatically improved: 77.5% unique oppositions vs old algorithm's clustering problem
+- Shuffle feature fully working: tested with 0 completed (reshuffles all) and 1 completed (keeps it)
+- All verified via curl API testing

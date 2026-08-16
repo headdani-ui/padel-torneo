@@ -6,11 +6,13 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { ScrollArea, ScrollBar } from '@/components/ui/scroll-area';
-import { ChevronLeft, ChevronRight, MapPin, Clock } from 'lucide-react';
+import { ChevronLeft, ChevronRight, MapPin, Clock, Shuffle, Loader2 } from 'lucide-react';
 
 export default function CalendarView() {
-  const { tournament } = useTournamentStore();
+  const { tournament, refreshTournament } = useTournamentStore();
   const [selectedDay, setSelectedDay] = useState(1);
+  const [shuffling, setShuffling] = useState(false);
+  const [shuffleMessage, setShuffleMessage] = useState('');
 
   if (!tournament) return null;
 
@@ -18,15 +20,38 @@ export default function CalendarView() {
   const dayMatches = tournament.matches.filter((m) => m.dayNumber === selectedDay);
   const courts = tournament.numCourts;
 
+  // Count unplayed matches
+  const unplayedCount = tournament.matches.filter((m) => m.status === 'SCHEDULED').length;
+
   // Group matches by court
   const matchesByCourt: Record<number, typeof dayMatches> = {};
   for (let c = 1; c <= courts; c++) {
     matchesByCourt[c] = dayMatches.filter((m) => m.courtNumber === c);
   }
 
+  const handleShuffle = async () => {
+    setShuffling(true);
+    setShuffleMessage('');
+    try {
+      const res = await fetch('/api/tournament/shuffle', { method: 'POST' });
+      const data = await res.json();
+      if (data.success) {
+        setShuffleMessage(data.message);
+        await refreshTournament();
+      } else {
+        setShuffleMessage(data.message || 'Errore');
+      }
+    } catch {
+      setShuffleMessage('Errore di connessione');
+    } finally {
+      setShuffling(false);
+      setTimeout(() => setShuffleMessage(''), 4000);
+    }
+  };
+
   return (
     <div className="space-y-4">
-      {/* Day Navigation */}
+      {/* Day Navigation + Shuffle */}
       <div className="flex items-center gap-2">
         <Button
           size="sm"
@@ -78,16 +103,46 @@ export default function CalendarView() {
         >
           <ChevronRight className="w-4 h-4" />
         </Button>
+
+        {/* Shuffle button */}
+        {unplayedCount > 0 && (
+          <Button
+            size="sm"
+            variant="outline"
+            className="bg-neon/10 text-neon border-neon hover:bg-neon/20 text-xs whitespace-nowrap"
+            onClick={handleShuffle}
+            disabled={shuffling}
+          >
+            {shuffling ? (
+              <Loader2 className="w-3 h-3 mr-1 animate-spin" />
+            ) : (
+              <Shuffle className="w-3 h-3 mr-1" />
+            )}
+            Shuffle
+          </Button>
+        )}
       </div>
+
+      {/* Shuffle message */}
+      {shuffleMessage && (
+        <p className="text-neon text-xs text-center animate-pulse">{shuffleMessage}</p>
+      )}
 
       {/* Day Title */}
       <div className="flex items-center justify-between">
         <h2 className="text-lg font-bold neon-text flex items-center gap-2">
           <Clock className="w-5 h-5" /> Giornata {selectedDay}
         </h2>
-        <Badge className="bg-neon/10 text-neon border border-neon text-xs">
-          {dayMatches.length} partite
-        </Badge>
+        <div className="flex gap-2">
+          <Badge className="bg-neon/10 text-neon border border-neon text-xs">
+            {dayMatches.length} partite
+          </Badge>
+          {unplayedCount > 0 && (
+            <Badge className="bg-shocking/10 text-shocking border border-shocking text-xs">
+              <Shuffle className="w-3 h-3 mr-1" /> {unplayedCount} da giocare
+            </Badge>
+          )}
+        </div>
       </div>
 
       {/* Courts Grid */}
@@ -138,7 +193,6 @@ export default function CalendarView() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent className="p-4 pt-0">
-                  {/* Team 1 vs Team 2 */}
                   <div className="flex items-center justify-between gap-2">
                     {/* Team 1 */}
                     <div className="flex-1 text-right space-y-1">
