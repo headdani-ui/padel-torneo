@@ -122,3 +122,30 @@ Stage Summary:
 - Schedule mixing dramatically improved: 77.5% unique oppositions vs old algorithm's clustering problem
 - Shuffle feature fully working: tested with 0 completed (reshuffles all) and 1 completed (keeps it)
 - All verified via curl API testing
+
+---
+Task ID: 1-3
+Agent: Main
+Task: Implement 3 user requests: max courts = 4, better schedule mixing, shuffle button
+
+Work Log:
+- Changed max courts from dynamic `Math.min(4, Math.floor(players.length/4))` to hardcoded 4 in setup-wizard.tsx
+- Completely rewrote scheduler.ts with multi-run optimization algorithm:
+  - Exhaustive combinatorial search for pools ≤12 players (C(n,4)*3 pairings)
+  - Random sampling (200 attempts) fallback for larger pools
+  - Multi-run approach: 5 independent schedule generations, best overall score selected
+  - Scoring weights: opponent diversity (5x) > partner diversity (3x) > playtime balance (2x)
+  - Overall schedule scoring: partner variance, opponent variance, unique opponents per player, playtime balance
+- Updated shuffle API route to use history-aware scheduling:
+  - `buildSeedCounts()` extracts partnership/opposition/play counts from completed matches
+  - `generateShuffledSchedule()` uses those seeds to avoid repeating patterns from played matches
+  - Batch database operations (parallel deletes, batch pair lookup, parallel creates)
+  - Fixed missing team1/team2 relation includes in the query
+- Calendar view already had shuffle button from previous session
+
+Stage Summary:
+- setup-wizard.tsx: max courts now always 4 (was dynamically limited by player count)
+- scheduler.ts: Complete rewrite with multi-run optimization, exhaustive search, balanced scoring
+- shuffle/route.ts: History-aware shuffle that respects completed match patterns
+- All code passes ESLint
+- Scheduler benchmarked at ~350ms for 16 players, 3 courts, 8 days (direct Node.js test)

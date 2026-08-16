@@ -1,6 +1,6 @@
 import { NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { generateSchedule, generateId } from '@/lib/scheduler';
+import { generateShuffledSchedule, generateId, buildSeedCounts } from '@/lib/scheduler';
 
 // POST: Shuffle only unplayed matches (status = SCHEDULED)
 export async function POST() {
@@ -10,7 +10,11 @@ export async function POST() {
         players: true,
         pairs: true,
         matches: {
-          include: { setResults: true },
+          include: {
+            setResults: true,
+            team1: true,
+            team2: true,
+          },
           orderBy: [{ dayNumber: 'asc' }, { courtNumber: 'asc' }],
         },
       },
@@ -20,7 +24,6 @@ export async function POST() {
       return NextResponse.json({ error: 'Nessun torneo trovato' }, { status: 404 });
     }
 
-    // Separate completed from scheduled matches
     const completedMatches = tournament.matches.filter(m => m.status === 'COMPLETED');
     const scheduledMatches = tournament.matches.filter(m => m.status === 'SCHEDULED');
 
@@ -31,25 +34,36 @@ export async function POST() {
       });
     }
 
-    // Get the days that need rescheduling
     const daysNeedingReschedule = [...new Set(scheduledMatches.map(m => m.dayNumber))].sort((a, b) => a - b);
 
-    // Get player data
     const playerData = tournament.players.map(p => ({
       id: p.id,
       name: p.name,
       gender: p.gender as 'M' | 'F',
     }));
 
-    // Delete old scheduled matches
+    // Build seed counts from completed matches
+    const seedCounts = buildSeedCounts(
+      completedMatches.map(m => ({
+        team1Id: m.team1Id,
+        team2Id: m.team2Id,
+        team1: { player1Id: m.team1.player1Id, player2Id: m.team1.player2Id },
+        team2: { player1Id: m.team2.player1Id, player2Id: m.team2.player2Id },
+      })),
+      tournament.pairs.map(p => ({
+        id: p.id,
+        player1Id: p.player1Id,
+        player2Id: p.player2Id,
+      }))
+    );
+
+    // Delete old scheduled matches and pairs in parallel
     const scheduledMatchIds = scheduledMatches.map(m => m.id);
     const scheduledPairIds = new Set<string>();
     for (const m of scheduledMatches) {
       scheduledPairIds.add(m.team1Id);
       scheduledPairIds.add(m.team2Id);
     }
-
-    // Pairs also used in completed matches must NOT be deleted
     const completedPairIds = new Set<string>();
     for (const m of completedMatches) {
       completedPairIds.add(m.team1Id);
@@ -57,69 +71,83 @@ export async function POST() {
     }
     const pairsToDelete = [...scheduledPairIds].filter(id => !completedPairIds.has(id));
 
-    await db.match.deleteMany({ where: { id: { in: scheduledMatchIds } } });
-    if (pairsToDelete.length > 0) {
-      await db.pair.deleteMany({ where: { id: { in: pairsToDelete } } });
-    }
+    await Promise.all([
+      db.match.deleteMany({ where: { id: { in: scheduledMatchIds } } }),
+      pairsToDelete.length > 0
+        ? db.pair.deleteMany({ where: { id: { in: pairsToDelete } } })
+        : Promise.resolve(),
+    ]);
 
-    // Generate a completely new schedule, then filter to only the days we need
-    const newSchedule = generateSchedule({
-      players: playerData,
-      isMixed: tournament.isMixed,
-      isFixedPairs: tournament.isFixedPairs,
-      fixedPairs: tournament.isFixedPairs
-        ? tournament.pairs.filter(p => p.isFixed).map(p => ({
-            id: p.id,
-            player1Id: p.player1Id,
-            player2Id: p.player2Id,
-            player1Name: p.player1Name,
-            player2Name: p.player2Name,
-            isFixed: true,
-          }))
-        : undefined,
-      numCourts: tournament.numCourts,
-      numDays: tournament.numDays,
-    });
-
-    // Only keep matches for the days that were scheduled
-    const newMatchesForDays = newSchedule.matches.filter(m =>
-      daysNeedingReschedule.includes(m.dayNumber)
+    // Generate new schedule seeded with completed match history
+    const newSchedule = generateShuffledSchedule(
+      playerData,
+      tournament.isMixed,
+      tournament.numCourts,
+      tournament.numDays,
+      daysNeedingReschedule,
+      seedCounts
     );
 
-    // Create new pairs in DB (dedup by player1Id+player2Id)
+    // Build pair lookups and creates in batch (not sequential!)
+    const existingPairs = await db.pair.findMany({
+      where: { tournamentId: tournament.id },
+    });
+
+    // Create a lookup: "player1Id-player2Id" -> pair id
+    const pairLookup = new Map<string, string>();
+    for (const p of existingPairs) {
+      const key = [p.player1Id, p.player2Id].sort().join('|');
+      pairLookup.set(key, p.id);
+    }
+
+    // Collect all new pairs to create
+    const newPairsToCreate: { id: string; player1Id: string; player2Id: string; player1Name: string; player2Name: string }[] = [];
     const newPairMap: Record<string, string> = {};
-    for (const m of newMatchesForDays) {
+
+    for (const m of newSchedule.matches) {
       for (const team of [m.team1, m.team2]) {
         if (!newPairMap[team.id]) {
-          const existing = await db.pair.findFirst({
-            where: {
+          const key = [team.player1Id, team.player2Id].sort().join('|');
+          const existingId = pairLookup.get(key);
+          if (existingId) {
+            newPairMap[team.id] = existingId;
+          } else {
+            const newId = generateId();
+            newPairsToCreate.push({
+              id: newId,
               player1Id: team.player1Id,
               player2Id: team.player2Id,
-            },
-          });
-          if (existing) {
-            newPairMap[team.id] = existing.id;
-          } else {
-            const created = await db.pair.create({
-              data: {
-                id: generateId(),
-                player1Id: team.player1Id,
-                player2Id: team.player2Id,
-                player1Name: team.player1Name,
-                player2Name: team.player2Name,
-                tournamentId: tournament.id,
-                isFixed: false,
-              },
+              player1Name: team.player1Name,
+              player2Name: team.player2Name,
             });
-            newPairMap[team.id] = created.id;
+            newPairMap[team.id] = newId;
           }
         }
       }
     }
 
-    // Create new matches in DB
+    // Create all new pairs in parallel
+    if (newPairsToCreate.length > 0) {
+      await Promise.all(
+        newPairsToCreate.map(p =>
+          db.pair.create({
+            data: {
+              id: p.id,
+              player1Id: p.player1Id,
+              player2Id: p.player2Id,
+              player1Name: p.player1Name,
+              player2Name: p.player2Name,
+              tournamentId: tournament.id,
+              isFixed: false,
+            },
+          })
+        )
+      );
+    }
+
+    // Create all new matches in parallel
     await Promise.all(
-      newMatchesForDays.map(m =>
+      newSchedule.matches.map(m =>
         db.match.create({
           data: {
             id: generateId(),
@@ -136,8 +164,8 @@ export async function POST() {
 
     return NextResponse.json({
       success: true,
-      message: `Calendario mescolato! ${scheduledMatches.length} partite rigenerate, ${completedMatches.length} completate mantenute.`,
-      shuffledCount: newMatchesForDays.length,
+      message: `Calendario mescolato! ${newSchedule.matches.length} partite rigenerate, ${completedMatches.length} completate mantenute.`,
+      shuffledCount: newSchedule.matches.length,
       keptCount: completedMatches.length,
     });
   } catch (error) {

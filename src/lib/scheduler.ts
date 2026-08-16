@@ -20,6 +20,7 @@ export interface MatchData {
   courtNumber: number;
   team1: PairData;
   team2: PairData;
+  status?: string;
 }
 
 export interface ScheduleResult {
@@ -36,6 +37,13 @@ interface TournamentSettings {
   numDays: number;
 }
 
+// Seed counts from pre-existing (completed) matches - used by shuffle
+export interface SeedCounts {
+  partnerCount: Record<string, number>;
+  opponentCount: Record<string, number>;
+  playCount: Record<string, number>;
+}
+
 function makePairKey(p1: string, p2: string): string {
   return [p1, p2].sort().join('-');
 }
@@ -48,6 +56,84 @@ function shuffle<T>(arr: T[]): T[] {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+// ─── TRACKERS ──────────────────────────────────────────────────────────────
+
+interface Trackers {
+  partnerCount: Record<string, number>;
+  opponentCount: Record<string, number>;
+  playCount: Record<string, number>;
+}
+
+function createTrackers(seed?: SeedCounts): Trackers {
+  return {
+    partnerCount: { ...(seed?.partnerCount || {}) },
+    opponentCount: { ...(seed?.opponentCount || {}) },
+    playCount: { ...(seed?.playCount || {}) },
+  };
+}
+
+const getPC = (t: Trackers, a: string, b: string) => t.partnerCount[makePairKey(a, b)] || 0;
+const getOC = (t: Trackers, a: string, b: string) => t.opponentCount[makePairKey(a, b)] || 0;
+const getPlay = (t: Trackers, a: string) => t.playCount[a] || 0;
+
+const incPC = (t: Trackers, a: string, b: string) => {
+  const k = makePairKey(a, b);
+  t.partnerCount[k] = (t.partnerCount[k] || 0) + 1;
+};
+const incOC = (t: Trackers, a: string, b: string) => {
+  const k = makePairKey(a, b);
+  t.opponentCount[k] = (t.opponentCount[k] || 0) + 1;
+};
+const incPlay = (t: Trackers, a: string) => {
+  t.playCount[a] = (t.playCount[a] || 0) + 1;
+};
+
+// Record a match in the trackers
+function recordMatch(t: Trackers, t1: [PlayerData, PlayerData], t2: [PlayerData, PlayerData]) {
+  incPC(t, t1[0].id, t1[1].id);
+  incPC(t, t2[0].id, t2[1].id);
+  incOC(t, t1[0].id, t2[0].id);
+  incOC(t, t1[0].id, t2[1].id);
+  incOC(t, t1[1].id, t2[0].id);
+  incOC(t, t1[1].id, t2[1].id);
+  for (const p of [t1[0], t1[1], t2[0], t2[1]]) {
+    incPlay(t, p.id);
+  }
+}
+
+// ─── SCORE A SINGLE MATCH CONFIG ──────────────────────────────────────────
+// Lower is better. Weights: opponent diversity > partner diversity > playtime balance
+
+function scoreConfig(
+  t: Trackers,
+  config: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] },
+  allPlayerIds: string[],
+  avgPlayCount: number
+): number {
+  const { t1, t2 } = config;
+
+  // Partner repeats (want to minimize - weight 3)
+  const partnerScore =
+    (getPC(t, t1[0].id, t1[1].id) + 1) * (getPC(t, t1[0].id, t1[1].id) + 1) +
+    (getPC(t, t2[0].id, t2[1].id) + 1) * (getPC(t, t2[0].id, t2[1].id) + 1);
+
+  // Opponent repeats (want to minimize even more - weight 5, squared for emphasis)
+  const opponentScore =
+    (getOC(t, t1[0].id, t2[0].id) + 1) * (getOC(t, t1[0].id, t2[0].id) + 1) +
+    (getOC(t, t1[0].id, t2[1].id) + 1) * (getOC(t, t1[0].id, t2[1].id) + 1) +
+    (getOC(t, t1[1].id, t2[0].id) + 1) * (getOC(t, t1[1].id, t2[0].id) + 1) +
+    (getOC(t, t1[1].id, t2[1].id) + 1) * (getOC(t, t1[1].id, t2[1].id) + 1);
+
+  // Playtime balance: prefer players who've played less (weight 2)
+  let playBalance = 0;
+  for (const p of [t1[0], t1[1], t2[0], t2[1]]) {
+    const diff = getPlay(t, p.id) - avgPlayCount;
+    playBalance += diff > 0 ? diff * diff : 0;
+  }
+
+  return partnerScore * 3 + opponentScore * 5 + playBalance * 2;
 }
 
 // ─── FIXED PAIRS SCHEDULING (Round-Robin) ───────────────────────────────
@@ -85,19 +171,22 @@ function scheduleFixedPairs(
     rotated.splice(1, 0, last);
   }
 
+  // Shuffle rounds for variety
+  const shuffledRounds = shuffle(allRounds);
+
   // Flatten rounds into days with court assignments
   const matches: MatchData[] = [];
   let matchIndex = 0;
 
   for (let day = 1; day <= numDays; day++) {
     for (let court = 1; court <= numCourts; court++) {
-      if (matchIndex >= allRounds.length * (allRounds[0]?.length || 0)) break;
+      if (matchIndex >= shuffledRounds.length * (shuffledRounds[0]?.length || 0)) break;
 
-      const roundIdx = Math.floor(matchIndex / (allRounds[0]?.length || 1));
-      const matchInRound = matchIndex % (allRounds[0]?.length || 1);
+      const roundIdx = Math.floor(matchIndex / (shuffledRounds[0]?.length || 1));
+      const matchInRound = matchIndex % (shuffledRounds[0]?.length || 1);
 
-      if (roundIdx < allRounds.length && matchInRound < allRounds[roundIdx].length) {
-        const [t1, t2] = allRounds[roundIdx][matchInRound];
+      if (roundIdx < shuffledRounds.length && matchInRound < shuffledRounds[roundIdx].length) {
+        const [t1, t2] = shuffledRounds[roundIdx][matchInRound];
         matches.push({
           dayNumber: day,
           courtNumber: court,
@@ -113,96 +202,115 @@ function scheduleFixedPairs(
 }
 
 // ─── MOBILE PAIRS SCHEDULING (NON-MIXED) ─────────────────────────────────
-// Uses a greedy optimization approach:
-// - Tracks how many times each pair of players have been partners
-// - Tracks how many times each pair of players have been opponents
-// - For each match slot, picks the combination that minimizes total repeats
+// Exhaustive combinatorial search + multi-run optimization
 
 function scheduleMobileNonMixed(
   players: PlayerData[],
   numCourts: number,
-  numDays: number
+  numDays: number,
+  seed?: SeedCounts
 ): { matches: MatchData[]; pairs: PairData[] } {
   const n = players.length;
   const matchesPerDay = Math.min(numCourts, Math.floor(n / 4));
+  if (matchesPerDay < 1) return { matches: [], pairs: [] };
+
+  // Run multiple times and pick the best schedule
+  const NUM_RUNS = 5;
+  let bestSchedule: { matches: MatchData[]; pairs: PairData[] } | null = null;
+  let bestOverallScore = Infinity;
+
+  for (let run = 0; run < NUM_RUNS; run++) {
+    const { matches, pairs, trackers } = runGreedyNonMixed(players, numCourts, numDays, matchesPerDay, seed);
+
+    // Score the overall schedule quality
+    const overallScore = scoreOverallSchedule(matches, players, n);
+
+    if (overallScore < bestOverallScore) {
+      bestOverallScore = overallScore;
+      bestSchedule = { matches, pairs };
+    }
+  }
+
+  return bestSchedule || { matches: [], pairs: [] };
+}
+
+function runGreedyNonMixed(
+  players: PlayerData[],
+  numCourts: number,
+  numDays: number,
+  matchesPerDay: number,
+  seed?: SeedCounts
+): { matches: MatchData[]; pairs: PairData[]; trackers: Trackers } {
+  const n = players.length;
+  const t = createTrackers(seed);
   const matches: MatchData[] = [];
   const pairs: PairData[] = [];
-
-  // Counters: how many times two players have been partners or opponents
-  const partnerCount: Record<string, number> = {};
-  const opponentCount: Record<string, number> = {};
-
-  const getPartnerCount = (a: string, b: string) => partnerCount[makePairKey(a, b)] || 0;
-  const getOpponentCount = (a: string, b: string) => opponentCount[makePairKey(a, b)] || 0;
-
-  const incPartner = (a: string, b: string) => {
-    const k = makePairKey(a, b);
-    partnerCount[k] = (partnerCount[k] || 0) + 1;
-  };
-  const incOpponent = (a: string, b: string) => {
-    const k = makePairKey(a, b);
-    opponentCount[k] = (opponentCount[k] || 0) + 1;
-  };
 
   for (let day = 0; day < numDays; day++) {
     const usedPlayers = new Set<string>();
 
-    // Shuffle players at start of each day for randomness
-    const available = shuffle(players.filter(p => !usedPlayers.has(p.id)));
-
     let court = 1;
     while (court <= matchesPerDay) {
-      // Get available (unused) players, shuffled
-      const pool = shuffle(players.filter(p => !usedPlayers.has(p.id)));
+      const pool = players.filter(p => !usedPlayers.has(p.id));
       if (pool.length < 4) break;
 
-      // Find the best 4-player group with the lowest total repeat score
+      // Calculate average play count for balance scoring
+      const totalPlay = pool.reduce((sum, p) => sum + getPlay(t, p.id), 0);
+      const avgPlayCount = totalPlay / pool.length;
+
+      // Exhaustive search: try ALL combinations of 4 from pool
       let bestScore = Infinity;
       let bestConfig: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] } | null = null;
-      let bestIndices: number[] = [];
 
-      // Sample multiple random combinations to find a good one
-      for (let attempt = 0; attempt < 50; attempt++) {
-        const sample = shuffle(pool).slice(0, 4);
-        const [a, b, c, d] = sample;
+      // For pools up to 12, exhaustive search is feasible. Beyond that, sample.
+      if (pool.length <= 12) {
+        for (let i = 0; i < pool.length; i++) {
+          for (let j = i + 1; j < pool.length; j++) {
+            for (let k = j + 1; k < pool.length; k++) {
+              for (let l = k + 1; l < pool.length; l++) {
+                const quad = [pool[i], pool[j], pool[k], pool[l]];
 
-        // Try all 3 pairings for these 4 players
-        const configs: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] }[] = [
-          { t1: [a, b], t2: [c, d] },
-          { t1: [a, c], t2: [b, d] },
-          { t1: [a, d], t2: [b, c] },
-        ];
+                // Try all 3 pairings
+                const configs: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] }[] = [
+                  { t1: [quad[0], quad[1]], t2: [quad[2], quad[3]] },
+                  { t1: [quad[0], quad[2]], t2: [quad[1], quad[3]] },
+                  { t1: [quad[0], quad[3]], t2: [quad[1], quad[2]] },
+                ];
 
-        for (const config of configs) {
-          const score =
-            getPartnerCount(config.t1[0].id, config.t1[1].id) +
-            getPartnerCount(config.t2[0].id, config.t2[1].id) +
-            getOpponentCount(config.t1[0].id, config.t2[0].id) +
-            getOpponentCount(config.t1[0].id, config.t2[1].id) +
-            getOpponentCount(config.t1[1].id, config.t2[0].id) +
-            getOpponentCount(config.t1[1].id, config.t2[1].id);
-
-          if (score < bestScore) {
-            bestScore = score;
-            bestConfig = config;
-            bestIndices = sample.map(s => s.id);
+                for (const config of configs) {
+                  const score = scoreConfig(t, config, players.map(p => p.id), avgPlayCount);
+                  if (score < bestScore) {
+                    bestScore = score;
+                    bestConfig = config;
+                  }
+                }
+              }
+            }
           }
         }
-
-        if (bestScore === 0) break; // Found a perfect combination
+      } else {
+        // Fallback: random sampling for very large pools
+        for (let attempt = 0; attempt < 200; attempt++) {
+          const sample = shuffle(pool).slice(0, 4);
+          const configs: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] }[] = [
+            { t1: [sample[0], sample[1]], t2: [sample[2], sample[3]] },
+            { t1: [sample[0], sample[2]], t2: [sample[1], sample[3]] },
+            { t1: [sample[0], sample[3]], t2: [sample[1], sample[2]] },
+          ];
+          for (const config of configs) {
+            const score = scoreConfig(t, config, players.map(p => p.id), avgPlayCount);
+            if (score < bestScore) {
+              bestScore = score;
+              bestConfig = config;
+            }
+          }
+        }
       }
 
       if (!bestConfig) break;
 
       const { t1, t2 } = bestConfig;
-
-      // Record partnership and opposition counts
-      incPartner(t1[0].id, t1[1].id);
-      incPartner(t2[0].id, t2[1].id);
-      incOpponent(t1[0].id, t2[0].id);
-      incOpponent(t1[0].id, t2[1].id);
-      incOpponent(t1[1].id, t2[0].id);
-      incOpponent(t1[1].id, t2[1].id);
+      recordMatch(t, t1, t2);
 
       const pair1: PairData = {
         id: `pair-day${day + 1}-c${court}-t1`,
@@ -229,17 +337,15 @@ function scheduleMobileNonMixed(
         team2: pair2,
       });
 
-      // Mark players as used today
-      t1[0] && usedPlayers.add(t1[0].id);
-      t1[1] && usedPlayers.add(t1[1].id);
-      t2[0] && usedPlayers.add(t2[0].id);
-      t2[1] && usedPlayers.add(t2[1].id);
+      for (const p of [t1[0], t1[1], t2[0], t2[1]]) {
+        usedPlayers.add(p.id);
+      }
 
       court++;
     }
   }
 
-  return { matches, pairs };
+  return { matches, pairs, trackers: t };
 }
 
 // ─── MOBILE PAIRS SCHEDULING (MIXED) ─────────────────────────────────────
@@ -247,29 +353,46 @@ function scheduleMobileNonMixed(
 function scheduleMobileMixed(
   players: PlayerData[],
   numCourts: number,
-  numDays: number
+  numDays: number,
+  seed?: SeedCounts
 ): { matches: MatchData[]; pairs: PairData[] } {
   const males = players.filter(p => p.gender === 'M');
   const females = players.filter(p => p.gender === 'F');
 
   const matchesPerDay = Math.min(numCourts, Math.min(males.length, females.length) / 2 | 0);
+  if (matchesPerDay < 1) return { matches: [], pairs: [] };
+
+  // Multi-run for mixed too
+  const NUM_RUNS = 5;
+  let bestSchedule: { matches: MatchData[]; pairs: PairData[] } | null = null;
+  let bestOverallScore = Infinity;
+
+  for (let run = 0; run < NUM_RUNS; run++) {
+    const { matches, pairs } = runGreedyMixed(males, females, numCourts, numDays, matchesPerDay, players, seed);
+
+    const overallScore = scoreOverallSchedule(matches, players, players.length);
+
+    if (overallScore < bestOverallScore) {
+      bestOverallScore = overallScore;
+      bestSchedule = { matches, pairs };
+    }
+  }
+
+  return bestSchedule || { matches: [], pairs: [] };
+}
+
+function runGreedyMixed(
+  males: PlayerData[],
+  females: PlayerData[],
+  numCourts: number,
+  numDays: number,
+  matchesPerDay: number,
+  allPlayers: PlayerData[],
+  seed?: SeedCounts
+): { matches: MatchData[]; pairs: PairData[] } {
+  const t = createTrackers(seed);
   const matches: MatchData[] = [];
   const pairs: PairData[] = [];
-
-  // Trackers
-  const partnerCount: Record<string, number> = {};
-  const opponentCount: Record<string, number> = {};
-
-  const getPartnerCount = (a: string, b: string) => partnerCount[makePairKey(a, b)] || 0;
-  const getOpponentCount = (a: string, b: string) => opponentCount[makePairKey(a, b)] || 0;
-  const incPartner = (a: string, b: string) => {
-    const k = makePairKey(a, b);
-    partnerCount[k] = (partnerCount[k] || 0) + 1;
-  };
-  const incOpponent = (a: string, b: string) => {
-    const k = makePairKey(a, b);
-    opponentCount[k] = (opponentCount[k] || 0) + 1;
-  };
 
   for (let day = 0; day < numDays; day++) {
     const usedMales = new Set<string>();
@@ -277,59 +400,81 @@ function scheduleMobileMixed(
 
     let court = 1;
     while (court <= matchesPerDay) {
-      const availM = shuffle(males.filter(p => !usedMales.has(p.id)));
-      const availF = shuffle(females.filter(p => !usedFemales.has(p.id)));
+      const availM = males.filter(p => !usedMales.has(p.id));
+      const availF = females.filter(p => !usedFemales.has(p.id));
       if (availM.length < 2 || availF.length < 2) break;
 
-      // Find best M+F pairing with lowest repeat score
+      // Calculate average play count
+      const totalPlay = [...availM, ...availF].reduce((sum, p) => sum + getPlay(t, p.id), 0);
+      const avgPlayCount = totalPlay / (availM.length + availF.length);
+
+      // Exhaustive search: try all combinations of 2M + 2F
       let bestScore = Infinity;
       let bestConfig: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] } | null = null;
 
-      for (let attempt = 0; attempt < 50; attempt++) {
-        const m1 = availM[attempt % availM.length];
-        const m2 = availM[(attempt + 1) % availM.length];
-        const f1 = availF[Math.floor(attempt / availM.length) % availF.length];
-        const f2 = availF[(Math.floor(attempt / availM.length) + 1) % availF.length];
+      const mCombs: [number, number][] = [];
+      for (let i = 0; i < availM.length; i++) {
+        for (let j = i + 1; j < availM.length; j++) {
+          mCombs.push([i, j]);
+        }
+      }
 
-        if (m1 === m2 || f1 === f2) continue;
-        if (usedMales.has(m1.id) || usedMales.has(m2.id)) continue;
-        if (usedFemales.has(f1.id) || usedFemales.has(f2.id)) continue;
+      const fCombs: [number, number][] = [];
+      for (let i = 0; i < availF.length; i++) {
+        for (let j = i + 1; j < availF.length; j++) {
+          fCombs.push([i, j]);
+        }
+      }
 
-        // Try all 3 mixed pairings
-        const configs: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] }[] = [
-          { t1: [m1, f1], t2: [m2, f2] },
-          { t1: [m1, f2], t2: [m2, f1] },
-          // Note: [m2,f1]+[m1,f2] is same as above just swapped, so skip
-        ];
+      // If combinatorial explosion, use sampling
+      const maxCombs = mCombs.length * fCombs.length;
+      if (maxCombs <= 500) {
+        for (const [mi1, mi2] of mCombs) {
+          for (const [fi1, fi2] of fCombs) {
+            const m1 = availM[mi1], m2 = availM[mi2];
+            const f1 = availF[fi1], f2 = availF[fi2];
 
-        for (const config of configs) {
-          const score =
-            getPartnerCount(config.t1[0].id, config.t1[1].id) +
-            getPartnerCount(config.t2[0].id, config.t2[1].id) +
-            getOpponentCount(config.t1[0].id, config.t2[0].id) +
-            getOpponentCount(config.t1[0].id, config.t2[1].id) +
-            getOpponentCount(config.t1[1].id, config.t2[0].id) +
-            getOpponentCount(config.t1[1].id, config.t2[1].id);
+            // Try 2 mixed pairings (swap females)
+            const configs: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] }[] = [
+              { t1: [m1, f1], t2: [m2, f2] },
+              { t1: [m1, f2], t2: [m2, f1] },
+            ];
 
-          if (score < bestScore) {
-            bestScore = score;
-            bestConfig = config;
+            for (const config of configs) {
+              const score = scoreConfig(t, config, allPlayers.map(p => p.id), avgPlayCount);
+              if (score < bestScore) {
+                bestScore = score;
+                bestConfig = config;
+              }
+            }
           }
         }
+      } else {
+        // Sampling fallback
+        for (let attempt = 0; attempt < 200; attempt++) {
+          const shuffledM = shuffle(availM);
+          const shuffledF = shuffle(availF);
+          const m1 = shuffledM[0], m2 = shuffledM[1];
+          const f1 = shuffledF[0], f2 = shuffledF[1];
 
-        if (bestScore === 0) break;
+          const configs: { t1: [PlayerData, PlayerData]; t2: [PlayerData, PlayerData] }[] = [
+            { t1: [m1, f1], t2: [m2, f2] },
+            { t1: [m1, f2], t2: [m2, f1] },
+          ];
+          for (const config of configs) {
+            const score = scoreConfig(t, config, allPlayers.map(p => p.id), avgPlayCount);
+            if (score < bestScore) {
+              bestScore = score;
+              bestConfig = config;
+            }
+          }
+        }
       }
 
       if (!bestConfig) break;
 
       const { t1, t2 } = bestConfig;
-
-      incPartner(t1[0].id, t1[1].id);
-      incPartner(t2[0].id, t2[1].id);
-      incOpponent(t1[0].id, t2[0].id);
-      incOpponent(t1[0].id, t2[1].id);
-      incOpponent(t1[1].id, t2[0].id);
-      incOpponent(t1[1].id, t2[1].id);
+      recordMatch(t, t1, t2);
 
       const pair1: PairData = {
         id: `pair-day${day + 1}-c${court}-t1`,
@@ -366,6 +511,86 @@ function scheduleMobileMixed(
   }
 
   return { matches, pairs };
+}
+
+// ─── OVERALL SCHEDULE SCORING ──────────────────────────────────────────────
+// Lower is better. Evaluates diversity across the entire schedule.
+
+function scoreOverallSchedule(matches: MatchData[], players: PlayerData[], n: number): number {
+  const partnerCount: Record<string, number> = {};
+  const opponentCount: Record<string, number> = {};
+  const playCount: Record<string, number> = {};
+
+  for (const m of matches) {
+    const p1a = m.team1.player1Id, p1b = m.team1.player2Id;
+    const p2a = m.team2.player1Id, p2b = m.team2.player2Id;
+
+    // Partner counts
+    const pk1 = makePairKey(p1a, p1b);
+    partnerCount[pk1] = (partnerCount[pk1] || 0) + 1;
+    const pk2 = makePairKey(p2a, p2b);
+    partnerCount[pk2] = (partnerCount[pk2] || 0) + 1;
+
+    // Opponent counts (cross-team pairs)
+    for (const a of [p1a, p1b]) {
+      for (const b of [p2a, p2b]) {
+        const ok = makePairKey(a, b);
+        opponentCount[ok] = (opponentCount[ok] || 0) + 1;
+      }
+    }
+
+    // Play counts
+    for (const pid of [p1a, p1b, p2a, p2b]) {
+      playCount[pid] = (playCount[pid] || 0) + 1;
+    }
+  }
+
+  // Score 1: Partner diversity — penalize uneven distribution (want all partnerships ~equal)
+  const partnerValues = Object.values(partnerCount);
+  const avgPartner = partnerValues.length > 0 ? partnerValues.reduce((a, b) => a + b, 0) / partnerValues.length : 0;
+  const partnerVariance = partnerValues.reduce((sum, v) => sum + (v - avgPartner) * (v - avgPartner), 0);
+
+  // Score 2: Opponent diversity — penalize uneven distribution
+  const opponentValues = Object.values(opponentCount);
+  const avgOpponent = opponentValues.length > 0 ? opponentValues.reduce((a, b) => a + b, 0) / opponentValues.length : 0;
+  const opponentVariance = opponentValues.reduce((sum, v) => sum + (v - avgOpponent) * (v - avgOpponent), 0);
+
+  // Score 3: Unique opponents per player (higher is better → negative penalty)
+  const uniqueOpponents: Record<string, Set<string>> = {};
+  for (const pid of players.map(p => p.id)) {
+    uniqueOpponents[pid] = new Set();
+  }
+  for (const [key, count] of Object.entries(opponentCount)) {
+    const [a, b] = key.split('-');
+    if (uniqueOpponents[a]) uniqueOpponents[a].add(b);
+    if (uniqueOpponents[b]) uniqueOpponents[b].add(a);
+  }
+  const minUniqueOpponents = Math.min(...players.map(p => uniqueOpponents[p.id].size));
+
+  // Score 4: Unique partners per player
+  const uniquePartners: Record<string, Set<string>> = {};
+  for (const pid of players.map(p => p.id)) {
+    uniquePartners[pid] = new Set();
+  }
+  for (const [key] of Object.entries(partnerCount)) {
+    const [a, b] = key.split('-');
+    if (uniquePartners[a]) uniquePartners[a].add(b);
+    if (uniquePartners[b]) uniquePartners[b].add(a);
+  }
+  const minUniquePartners = Math.min(...players.map(p => uniquePartners[p.id].size));
+
+  // Score 5: Playtime balance
+  const avgPlay = Object.values(playCount).reduce((a, b) => a + b, 0) / n;
+  const playVariance = Object.values(playCount).reduce((sum, v) => sum + (v - avgPlay) * (v - avgPlay), 0);
+
+  // Lower is better. We reward diversity (negative) and penalize variance (positive)
+  return (
+    partnerVariance * 10 +
+    opponentVariance * 15 +
+    playVariance * 5 +
+    -minUniqueOpponents * 20 +
+    -minUniquePartners * 15
+  );
 }
 
 // ─── MAIN SCHEDULER ──────────────────────────────────────────────────────
@@ -409,46 +634,141 @@ export function generateSchedule(settings: TournamentSettings): ScheduleResult {
   return scheduleMobileNonMixed(players, numCourts, numDays);
 }
 
-// ─── SHUFFLE SCHEDULE (for unplayed matches) ───────────────────────────────
-// Regenerates only matches that haven't been played yet (status = SCHEDULED)
-// Uses the same greedy algorithm but seeds it with existing partnership/opponent counts
+// ─── SHUFFLE SCHEDULE (history-aware) ──────────────────────────────────────
+// Accepts seed counts from completed matches to ensure continuity
 
-export function shuffleSchedule(
+export function generateShuffledSchedule(
   players: PlayerData[],
-  existingMatches: MatchData[],
+  isMixed: boolean,
   numCourts: number,
   numDays: number,
-  isMixed: boolean
-): { matches: MatchData[]; pairs: PairData[]; newPairs: PairData[] } {
-  // Separate completed matches (keep as-is) from scheduled matches (regenerate)
-  const completedMatches = existingMatches.filter(m => m.status === 'COMPLETED');
-  // Note: we don't have status in MatchData from the scheduler type, 
-  // so we rely on the API layer to pass only the unplayed match slots
+  daysToGenerate: number[],
+  seed: SeedCounts
+): ScheduleResult {
+  if (players.length < 4) {
+    return { matches: [], pairs: [] };
+  }
 
-  // Count existing partnerships and oppositions from completed matches
+  let result: { matches: MatchData[]; pairs: PairData[] };
+
+  if (isMixed) {
+    const males = players.filter(p => p.gender === 'M');
+    const females = players.filter(p => p.gender === 'F');
+    if (males.length < 2 || females.length < 2) {
+      return { matches: [], pairs: [] };
+    }
+
+    // Multi-run with seed
+    const NUM_RUNS = 5;
+    let bestSchedule: { matches: MatchData[]; pairs: PairData[] } | null = null;
+    let bestOverallScore = Infinity;
+
+    for (let run = 0; run < NUM_RUNS; run++) {
+      const matchesPerDay = Math.min(numCourts, Math.min(males.length, females.length) / 2 | 0);
+      const { matches, pairs } = runGreedyMixed(males, females, numCourts, numDays, matchesPerDay, players, seed);
+      // Filter to only the days we need
+      const filtered = matches.filter(m => daysToGenerate.includes(m.dayNumber));
+      const filteredPairs = new Set<string>();
+      for (const m of filtered) {
+        filteredPairs.add(m.team1.id);
+        filteredPairs.add(m.team2.id);
+      }
+      const filteredResult = {
+        matches: filtered,
+        pairs: pairs.filter(p => filteredPairs.has(p.id)),
+      };
+
+      const overallScore = scoreOverallSchedule(
+        filtered,
+        players,
+        players.length
+      );
+
+      if (overallScore < bestOverallScore) {
+        bestOverallScore = overallScore;
+        bestSchedule = filteredResult;
+      }
+    }
+
+    result = bestSchedule || { matches: [], pairs: [] };
+  } else {
+    // Multi-run with seed for non-mixed
+    const NUM_RUNS = 5;
+    let bestSchedule: { matches: MatchData[]; pairs: PairData[] } | null = null;
+    let bestOverallScore = Infinity;
+
+    for (let run = 0; run < NUM_RUNS; run++) {
+      const n = players.length;
+      const matchesPerDay = Math.min(numCourts, Math.floor(n / 4));
+      const { matches, pairs } = runGreedyNonMixed(players, numCourts, numDays, matchesPerDay, seed);
+
+      const filtered = matches.filter(m => daysToGenerate.includes(m.dayNumber));
+      const filteredPairs = new Set<string>();
+      for (const m of filtered) {
+        filteredPairs.add(m.team1.id);
+        filteredPairs.add(m.team2.id);
+      }
+      const filteredResult = {
+        matches: filtered,
+        pairs: pairs.filter(p => filteredPairs.has(p.id)),
+      };
+
+      const overallScore = scoreOverallSchedule(
+        filtered,
+        players,
+        n
+      );
+
+      if (overallScore < bestOverallScore) {
+        bestOverallScore = overallScore;
+        bestSchedule = filteredResult;
+      }
+    }
+
+    result = bestSchedule || { matches: [], pairs: [] };
+  }
+
+  return result;
+}
+
+// ─── BUILD SEED COUNTS FROM COMPLETED MATCHES ────────────────────────────
+
+export function buildSeedCounts(
+  completedMatches: { team1Id: string; team2Id: string; team1: { player1Id: string; player2Id: string }; team2: { player1Id: string; player2Id: string } }[],
+  allPairs: { id: string; player1Id: string; player2Id: string }[]
+): SeedCounts {
   const partnerCount: Record<string, number> = {};
   const opponentCount: Record<string, number> = {};
+  const playCount: Record<string, number> = {};
 
-  const incCount = (map: Record<string, number>, a: string, b: string) => {
-    const k = makePairKey(a, b);
-    map[k] = (map[k] || 0) + 1;
-  };
+  const pairMap = new Map(allPairs.map(p => [p.id, p]));
 
-  // We'll receive completed match data via the API, here we just generate fresh matches
-  const getPartnerCount = (a: string, b: string) => partnerCount[makePairKey(a, b)] || 0;
-  const getOpponentCount = (a: string, b: string) => opponentCount[makePairKey(a, b)] || 0;
+  for (const m of completedMatches) {
+    const t1 = pairMap.get(m.team1Id);
+    const t2 = pairMap.get(m.team2Id);
+    if (!t1 || !t2) continue;
 
-  // For shuffle, we use the same scheduling algorithm
-  // The seed counts will be passed from the API layer
-  const result = isMixed
-    ? scheduleMobileMixed(players, numCourts, numDays)
-    : scheduleMobileNonMixed(players, numCourts, numDays);
+    // Partners
+    const pk1 = makePairKey(t1.player1Id, t1.player2Id);
+    partnerCount[pk1] = (partnerCount[pk1] || 0) + 1;
+    const pk2 = makePairKey(t2.player1Id, t2.player2Id);
+    partnerCount[pk2] = (partnerCount[pk2] || 0) + 1;
 
-  return {
-    matches: result.matches,
-    pairs: result.pairs,
-    newPairs: result.pairs,
-  };
+    // Opponents
+    for (const a of [t1.player1Id, t1.player2Id]) {
+      for (const b of [t2.player1Id, t2.player2Id]) {
+        const ok = makePairKey(a, b);
+        opponentCount[ok] = (opponentCount[ok] || 0) + 1;
+      }
+    }
+
+    // Play counts
+    for (const pid of [t1.player1Id, t1.player2Id, t2.player1Id, t2.player2Id]) {
+      playCount[pid] = (playCount[pid] || 0) + 1;
+    }
+  }
+
+  return { partnerCount, opponentCount, playCount };
 }
 
 // Helper: generate a unique ID

@@ -607,8 +607,6 @@ function DefinePairsStep() {
 function CourtsDaysStep() {
   const { setup, updateSetup, setWizardStep } = useTournamentStore();
 
-  const maxCourts = Math.min(4, Math.floor(setup.players.length / 4));
-
   const handleNext = () => {
     if (setup.numCourts < 1 || setup.numDays < 1) return;
     setWizardStep('scoring');
@@ -641,20 +639,20 @@ function CourtsDaysStep() {
               <Input
                 type="number"
                 value={setup.numCourts}
-                onChange={(e) => updateSetup({ numCourts: Math.min(maxCourts, Math.max(1, parseInt(e.target.value) || 1)) })}
+                onChange={(e) => updateSetup({ numCourts: Math.max(1, Math.min(4, parseInt(e.target.value) || 1)) })}
                 className="w-16 text-center bg-surface text-neon border-border"
                 min={1}
-                max={Math.min(4, maxCourts)}
+                max={4}
               />
               <Button
                 variant="outline"
                 className="text-neon border-border"
-                onClick={() => updateSetup({ numCourts: Math.min(maxCourts, setup.numCourts + 1) })}
+                onClick={() => updateSetup({ numCourts: Math.min(4, setup.numCourts + 1) })}
               >
                 +
               </Button>
             </div>
-            <p className="text-neon-dim text-xs mt-2">Max: {maxCourts} campi</p>
+            <p className="text-neon-dim text-xs mt-2">Max: 4 campi</p>
           </CardContent>
         </Card>
 
